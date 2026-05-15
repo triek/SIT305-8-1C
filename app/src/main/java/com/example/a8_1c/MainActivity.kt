@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -31,16 +32,27 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.a8_1c.ui.theme._81CTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -134,10 +146,13 @@ fun LoginScreen(
 @Composable
 fun ChatScreen(username: String, modifier: Modifier = Modifier) {
     var inputText by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorText by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val chatStorage = remember { ChatStorage(context) }
     val messages = remember { mutableStateListOf<ChatMessage>() }
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         val savedMessages = chatStorage.readAllMessagesSorted()
@@ -184,6 +199,11 @@ fun ChatScreen(username: String, modifier: Modifier = Modifier) {
             }
         }
 
+        errorText?.let {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = it, color = Color(0xFFB00020), style = MaterialTheme.typography.bodySmall)
+        }
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -195,7 +215,8 @@ fun ChatScreen(username: String, modifier: Modifier = Modifier) {
                 onValueChange = { inputText = it },
                 placeholder = { Text("Type your message") },
                 modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(20.dp)
+                shape = RoundedCornerShape(20.dp),
+                enabled = !isLoading
             )
             Spacer(modifier = Modifier.width(8.dp))
             Button(
@@ -204,20 +225,97 @@ fun ChatScreen(username: String, modifier: Modifier = Modifier) {
                     if (trimmed.isNotEmpty()) {
                         val userTimestamp = System.currentTimeMillis()
                         chatStorage.insertMessage(username, trimmed, SenderType.USER, userTimestamp)
-
-                        val botText = "I got your message: $trimmed"
-                        val botTimestamp = System.currentTimeMillis()
-                        chatStorage.insertMessage("ChatBot", botText, SenderType.BOT, botTimestamp)
-
                         messages.clear()
                         messages.addAll(chatStorage.readAllMessagesSorted())
                         inputText = ""
+                        isLoading = true
+                        errorText = null
+
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) {
+                                GeminiApiService.sendUserMessage(trimmed)
+                            }
+
+                            val botTimestamp = System.currentTimeMillis()
+                            if (result.isSuccess) {
+                                val botText = result.getOrDefault("I couldn't generate a response.")
+                                chatStorage.insertMessage("ChatBot", botText, SenderType.BOT, botTimestamp)
+                            } else {
+                                errorText = result.exceptionOrNull()?.message ?: "Failed to call Gemini API."
+                                chatStorage.insertMessage(
+                                    "ChatBot",
+                                    "Sorry, I could not process your request right now.",
+                                    SenderType.BOT,
+                                    botTimestamp
+                                )
+                            }
+                            messages.clear()
+                            messages.addAll(chatStorage.readAllMessagesSorted())
+                            isLoading = false
+                        }
                     }
                 },
+                enabled = !isLoading,
                 shape = RoundedCornerShape(20.dp)
             ) {
-                Text("Send")
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .width(20.dp)
+                            .height(20.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                } else {
+                    Text("Send")
+                }
             }
+        }
+    }
+}
+
+object GeminiApiService {
+    private const val MODEL_NAME = "gemini-1.5-flash"
+
+    fun sendUserMessage(userMessage: String): Result<String> {
+        val apiKey = BuildConfig.GEMINI_API_KEY
+        if (apiKey.isBlank()) {
+            return Result.failure(IllegalStateException("GEMINI_API_KEY is missing. Add it in local.properties."))
+        }
+
+        return runCatching {
+            val endpoint =
+                "https://generativelanguage.googleapis.com/v1beta/models/$MODEL_NAME:generateContent?key=$apiKey"
+            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json")
+            }
+
+            val requestBody = JSONObject()
+                .put("contents", JSONArray().put(
+                    JSONObject().put("parts", JSONArray().put(JSONObject().put("text", userMessage)))
+                ))
+
+            OutputStreamWriter(connection.outputStream).use { writer ->
+                writer.write(requestBody.toString())
+            }
+
+            val responseCode = connection.responseCode
+            val stream = if (responseCode in 200..299) connection.inputStream else connection.errorStream
+            val responseBody = BufferedReader(InputStreamReader(stream)).use { it.readText() }
+
+            if (responseCode !in 200..299) {
+                throw IllegalStateException("Gemini API failed with code $responseCode: $responseBody")
+            }
+
+            val json = JSONObject(responseBody)
+            val candidates = json.optJSONArray("candidates")
+            val firstCandidate = candidates?.optJSONObject(0)
+            val content = firstCandidate?.optJSONObject("content")
+            val parts = content?.optJSONArray("parts")
+            parts?.optJSONObject(0)?.optString("text")
+                ?: throw IllegalStateException("Gemini response did not contain text.")
         }
     }
 }
@@ -261,16 +359,8 @@ private fun formatTimestamp(timestampMillis: Long): String {
 
 @Preview(showBackground = true)
 @Composable
-fun LoginScreenPreview() {
+fun LoginPreview() {
     _81CTheme {
         LoginScreen(username = "", onUsernameChanged = {}, onLogin = {})
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun ChatScreenPreview() {
-    _81CTheme {
-        ChatScreen(username = "Alex")
     }
 }
