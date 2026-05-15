@@ -28,8 +28,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,7 +42,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.a8_1c.ui.theme._81CTheme
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
@@ -56,19 +57,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-
-enum class SenderType {
-    USER,
-    BOT
-}
-
-data class ChatMessage(
-    val id: String,
-    val username: String,
-    val messageText: String,
-    val senderType: SenderType,
-    val timestamp: String
-)
 
 @Composable
 fun AppRoot(modifier: Modifier = Modifier) {
@@ -146,20 +134,23 @@ fun LoginScreen(
 @Composable
 fun ChatScreen(username: String, modifier: Modifier = Modifier) {
     var inputText by remember { mutableStateOf("") }
-    var messages by remember {
-        mutableStateOf(
-            listOf(
-                ChatMessage(
-                    id = "welcome",
-                    username = "ChatBot",
-                    messageText = "Hi $username, how can I help you today?",
-                    senderType = SenderType.BOT,
-                    timestamp = currentTimeLabel()
-                )
-            )
-        )
-    }
+    val context = LocalContext.current
+    val chatStorage = remember { ChatStorage(context) }
+    val messages = remember { mutableStateListOf<ChatMessage>() }
     val listState = rememberLazyListState()
+
+    LaunchedEffect(Unit) {
+        val savedMessages = chatStorage.readAllMessagesSorted()
+        messages.clear()
+        messages.addAll(savedMessages)
+
+        if (savedMessages.isEmpty()) {
+            val welcomeMessageText = "Hi $username, how can I help you today?"
+            val welcomeTimestamp = System.currentTimeMillis()
+            chatStorage.insertMessage("ChatBot", welcomeMessageText, SenderType.BOT, welcomeTimestamp)
+            messages.addAll(chatStorage.readAllMessagesSorted())
+        }
+    }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -211,13 +202,15 @@ fun ChatScreen(username: String, modifier: Modifier = Modifier) {
                 onClick = {
                     val trimmed = inputText.trim()
                     if (trimmed.isNotEmpty()) {
-                        messages = messages + ChatMessage(
-                            id = "user-${System.currentTimeMillis()}",
-                            username = username,
-                            messageText = trimmed,
-                            senderType = SenderType.USER,
-                            timestamp = currentTimeLabel()
-                        )
+                        val userTimestamp = System.currentTimeMillis()
+                        chatStorage.insertMessage(username, trimmed, SenderType.USER, userTimestamp)
+
+                        val botText = "I got your message: $trimmed"
+                        val botTimestamp = System.currentTimeMillis()
+                        chatStorage.insertMessage("ChatBot", botText, SenderType.BOT, botTimestamp)
+
+                        messages.clear()
+                        messages.addAll(chatStorage.readAllMessagesSorted())
                         inputText = ""
                     }
                 },
@@ -253,7 +246,7 @@ fun MessageBubble(message: ChatMessage) {
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = message.timestamp,
+                    text = formatTimestamp(message.timestampMillis),
                     color = if (isUser) Color(0xFFBBDEFB) else Color(0xFF607D8B),
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -262,8 +255,8 @@ fun MessageBubble(message: ChatMessage) {
     }
 }
 
-private fun currentTimeLabel(): String {
-    return SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
+private fun formatTimestamp(timestampMillis: Long): String {
+    return SimpleDateFormat("hh:mm a", Locale.getDefault()).format(timestampMillis)
 }
 
 @Preview(showBackground = true)
