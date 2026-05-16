@@ -23,10 +23,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -40,6 +43,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.a8_1c.ui.theme._81CTheme
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,20 +72,45 @@ data class UiMessage(
 @Composable
 fun AppRoot() {
     var username by remember { mutableStateOf("") }
-    var showChat by remember { mutableStateOf(false) }
+    var activeUser by remember { mutableStateOf<String?>(null) }
+    var messageInput by remember { mutableStateOf("") }
+    val chatHistoryByUser = remember { mutableStateMapOf<String, MutableList<UiMessage>>() }
 
-    if (showChat) {
+    if (activeUser != null) {
+        val currentUser = activeUser ?: "User"
+        val messages = chatHistoryByUser.getOrPut(currentUser) { mutableStateListOf() }
+
         ChatScreen(
-            username = username.ifBlank { "User" },
-            onSend = {},
-            onMessageChange = {},
-            messageInput = ""
+            username = currentUser,
+            messages = messages,
+            messageInput = messageInput,
+            onMessageChange = { messageInput = it },
+            onSend = {
+                val text = messageInput.trim()
+                if (text.isNotEmpty()) {
+                    messages.add(UiMessage(text = text, timestamp = getCurrentTime(), isUser = true))
+                    messageInput = ""
+                }
+            },
+            onLogout = {
+                activeUser = null
+                messageInput = ""
+            }
         )
     } else {
         LoginScreen(
             username = username,
             onUsernameChanged = { username = it },
-            onGo = { if (username.isNotBlank()) showChat = true }
+            onGo = {
+                val cleanName = username.trim()
+                if (cleanName.isNotBlank()) {
+                    if (!chatHistoryByUser.containsKey(cleanName)) {
+                        chatHistoryByUser[cleanName] = mutableStateListOf()
+                    }
+                    activeUser = cleanName
+                    messageInput = ""
+                }
+            }
         )
     }
 }
@@ -154,16 +185,12 @@ fun LoginScreen(
 @Composable
 fun ChatScreen(
     username: String,
+    messages: List<UiMessage>,
     messageInput: String,
     onMessageChange: (String) -> Unit,
-    onSend: () -> Unit
+    onSend: () -> Unit,
+    onLogout: () -> Unit
 ) {
-    val demoMessages = listOf(
-        UiMessage("Welcome $username!", "09:14", false),
-        UiMessage("Hi bot", "09:15", true),
-        UiMessage("How can I help?", "09:15", false)
-    )
-
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -171,11 +198,30 @@ fun ChatScreen(
             .padding(horizontal = 12.dp, vertical = 18.dp)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 16.dp, bottom = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Hello, $username!",
+                    color = Color.Black,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 24.sp
+                )
+                TextButton(onClick = onLogout) {
+                    Text("Logout", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            }
+
             LazyColumn(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                reverseLayout = true
             ) {
-                items(demoMessages) { msg ->
+                items(messages.asReversed()) { msg ->
                     ChatBubble(message = msg)
                 }
             }
@@ -279,6 +325,10 @@ fun AvatarBubble(isUser: Boolean) {
             fontWeight = FontWeight.Bold
         )
     }
+}
+
+private fun getCurrentTime(): String {
+    return SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
 }
 
 @Preview(showBackground = true)
