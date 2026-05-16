@@ -275,7 +275,7 @@ fun ChatScreen(username: String, modifier: Modifier = Modifier) {
 }
 
 object GeminiApiService {
-    private const val MODEL_NAME = "gemini-1.5-flash"
+    private const val MODEL_NAME = "gemini-3-flash-preview"
 
     fun sendUserMessage(userMessage: String): Result<String> {
         val apiKey = BuildConfig.GEMINI_API_KEY
