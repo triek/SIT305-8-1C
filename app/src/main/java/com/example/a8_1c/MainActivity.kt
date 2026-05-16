@@ -76,7 +76,14 @@ fun AppRoot(modifier: Modifier = Modifier) {
     var showChat by remember { mutableStateOf(false) }
 
     if (showChat) {
-        ChatScreen(username = username.trim(), modifier = modifier)
+        ChatScreen(
+            username = username.trim(),
+            onLogout = {
+                showChat = false
+                username = ""
+            },
+            modifier = modifier
+        )
     } else {
         LoginScreen(
             username = username,
@@ -144,7 +151,7 @@ fun LoginScreen(
 }
 
 @Composable
-fun ChatScreen(username: String, modifier: Modifier = Modifier) {
+fun ChatScreen(username: String, onLogout: () -> Unit, modifier: Modifier = Modifier) {
     var inputText by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
@@ -162,7 +169,7 @@ fun ChatScreen(username: String, modifier: Modifier = Modifier) {
         if (savedMessages.isEmpty()) {
             val welcomeMessageText = "Hi $username, how can I help you today?"
             val welcomeTimestamp = System.currentTimeMillis()
-            chatStorage.insertMessage("ChatBot", welcomeMessageText, SenderType.BOT, welcomeTimestamp)
+            chatStorage.insertMessage(username, welcomeMessageText, SenderType.BOT, welcomeTimestamp)
             messages.addAll(chatStorage.readMessagesByUsernameSorted(username))
         }
     }
@@ -179,13 +186,36 @@ fun ChatScreen(username: String, modifier: Modifier = Modifier) {
             .background(Color(0xFFF5F9FF))
             .padding(16.dp)
     ) {
-        Text(
-            text = "Chat with Bot",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFF0D47A1),
-            modifier = Modifier.padding(bottom = 12.dp)
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Chat with Bot",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF0D47A1)
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = username,
+                    color = Color(0xFF0D47A1),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(
+                    onClick = onLogout,
+                    enabled = !isLoading,
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Logout")
+                }
+            }
+        }
 
         Button(
             onClick = {
@@ -198,7 +228,7 @@ fun ChatScreen(username: String, modifier: Modifier = Modifier) {
                     val welcomeMessageText = "Hi $username, how can I help you today?"
                     val welcomeTimestamp = System.currentTimeMillis()
                     val reloadedMessages = withContext(Dispatchers.IO) {
-                        chatStorage.insertMessage("ChatBot", welcomeMessageText, SenderType.BOT, welcomeTimestamp)
+                        chatStorage.insertMessage(username, welcomeMessageText, SenderType.BOT, welcomeTimestamp)
                         chatStorage.readMessagesByUsernameSorted(username)
                     }
                     messages.addAll(reloadedMessages)
@@ -282,7 +312,7 @@ fun ChatScreen(username: String, modifier: Modifier = Modifier) {
 
                         val botMessage = ChatMessage(
                             id = botTimestamp,
-                            username = "ChatBot",
+                            username = username,
                             messageText = botText,
                             senderType = SenderType.BOT,
                             timestampMillis = botTimestamp
@@ -290,7 +320,7 @@ fun ChatScreen(username: String, modifier: Modifier = Modifier) {
                         messages.add(botMessage)
 
                         withContext(Dispatchers.IO) {
-                            chatStorage.insertMessage("ChatBot", botText, SenderType.BOT, botTimestamp)
+                            chatStorage.insertMessage(username, botText, SenderType.BOT, botTimestamp)
                         }
 
                         inputText = ""
