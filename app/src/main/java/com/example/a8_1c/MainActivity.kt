@@ -222,37 +222,55 @@ fun ChatScreen(username: String, modifier: Modifier = Modifier) {
             Button(
                 onClick = {
                     val trimmed = inputText.trim()
-                    if (trimmed.isNotEmpty()) {
+                    if (trimmed.isEmpty()) {
+                        return@Button
+                    }
+
+                    isLoading = true
+                    errorText = null
+
+                    scope.launch {
                         val userTimestamp = System.currentTimeMillis()
-                        chatStorage.insertMessage(username, trimmed, SenderType.USER, userTimestamp)
-                        messages.clear()
-                        messages.addAll(chatStorage.readAllMessagesSorted())
-                        inputText = ""
-                        isLoading = true
-                        errorText = null
+                        val userMessage = ChatMessage(
+                            id = userTimestamp,
+                            username = username,
+                            messageText = trimmed,
+                            senderType = SenderType.USER,
+                            timestampMillis = userTimestamp
+                        )
+                        messages.add(userMessage)
 
-                        scope.launch {
-                            val result = withContext(Dispatchers.IO) {
-                                GeminiApiService.sendUserMessage(trimmed)
-                            }
-
-                            val botTimestamp = System.currentTimeMillis()
-                            if (result.isSuccess) {
-                                val botText = result.getOrDefault("I couldn't generate a response.")
-                                chatStorage.insertMessage("ChatBot", botText, SenderType.BOT, botTimestamp)
-                            } else {
-                                errorText = result.exceptionOrNull()?.message ?: "Failed to call Gemini API."
-                                chatStorage.insertMessage(
-                                    "ChatBot",
-                                    "Sorry, I could not process your request right now.",
-                                    SenderType.BOT,
-                                    botTimestamp
-                                )
-                            }
-                            messages.clear()
-                            messages.addAll(chatStorage.readAllMessagesSorted())
-                            isLoading = false
+                        withContext(Dispatchers.IO) {
+                            chatStorage.insertMessage(username, trimmed, SenderType.USER, userTimestamp)
                         }
+
+                        val result = withContext(Dispatchers.IO) {
+                            GeminiApiService.sendUserMessage(trimmed)
+                        }
+
+                        val botTimestamp = System.currentTimeMillis()
+                        val botText = if (result.isSuccess) {
+                            result.getOrDefault("I couldn't generate a response.")
+                        } else {
+                            errorText = result.exceptionOrNull()?.message ?: "Failed to call Gemini API."
+                            "Sorry, I could not process your request right now."
+                        }
+
+                        val botMessage = ChatMessage(
+                            id = botTimestamp,
+                            username = "ChatBot",
+                            messageText = botText,
+                            senderType = SenderType.BOT,
+                            timestampMillis = botTimestamp
+                        )
+                        messages.add(botMessage)
+
+                        withContext(Dispatchers.IO) {
+                            chatStorage.insertMessage("ChatBot", botText, SenderType.BOT, botTimestamp)
+                        }
+
+                        inputText = ""
+                        isLoading = false
                     }
                 },
                 enabled = !isLoading,
