@@ -155,7 +155,7 @@ fun ChatScreen(username: String, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
-        val savedMessages = chatStorage.readAllMessagesSorted()
+        val savedMessages = chatStorage.readMessagesByUsernameSorted(username)
         messages.clear()
         messages.addAll(savedMessages)
 
@@ -163,7 +163,7 @@ fun ChatScreen(username: String, modifier: Modifier = Modifier) {
             val welcomeMessageText = "Hi $username, how can I help you today?"
             val welcomeTimestamp = System.currentTimeMillis()
             chatStorage.insertMessage("ChatBot", welcomeMessageText, SenderType.BOT, welcomeTimestamp)
-            messages.addAll(chatStorage.readAllMessagesSorted())
+            messages.addAll(chatStorage.readMessagesByUsernameSorted(username))
         }
     }
 
@@ -186,6 +186,30 @@ fun ChatScreen(username: String, modifier: Modifier = Modifier) {
             color = Color(0xFF0D47A1),
             modifier = Modifier.padding(bottom = 12.dp)
         )
+
+        Button(
+            onClick = {
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        chatStorage.clearMessagesByUsername(username)
+                    }
+                    messages.clear()
+
+                    val welcomeMessageText = "Hi $username, how can I help you today?"
+                    val welcomeTimestamp = System.currentTimeMillis()
+                    val reloadedMessages = withContext(Dispatchers.IO) {
+                        chatStorage.insertMessage("ChatBot", welcomeMessageText, SenderType.BOT, welcomeTimestamp)
+                        chatStorage.readMessagesByUsernameSorted(username)
+                    }
+                    messages.addAll(reloadedMessages)
+                }
+            },
+            enabled = !isLoading,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.padding(bottom = 12.dp)
+        ) {
+            Text("Clear Chat")
+        }
 
         LazyColumn(
             state = listState,

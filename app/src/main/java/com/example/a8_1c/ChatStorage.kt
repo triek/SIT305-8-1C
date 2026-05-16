@@ -79,6 +79,45 @@ class ChatStorage(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, n
         return messages
     }
 
+    fun readMessagesByUsernameSorted(username: String): List<ChatMessage> {
+        val query = """
+            SELECT $COL_ID, $COL_USERNAME, $COL_MESSAGE_TEXT, $COL_SENDER_TYPE, $COL_TIMESTAMP_MILLIS
+            FROM $TABLE_MESSAGES
+            WHERE $COL_USERNAME = ? OR $COL_USERNAME = ?
+            ORDER BY $COL_TIMESTAMP_MILLIS ASC, $COL_ID ASC
+        """.trimIndent()
+
+        val messages = mutableListOf<ChatMessage>()
+        readableDatabase.rawQuery(query, arrayOf(username, CHAT_BOT_USERNAME)).use { cursor ->
+            val idIndex = cursor.getColumnIndexOrThrow(COL_ID)
+            val usernameIndex = cursor.getColumnIndexOrThrow(COL_USERNAME)
+            val messageIndex = cursor.getColumnIndexOrThrow(COL_MESSAGE_TEXT)
+            val senderIndex = cursor.getColumnIndexOrThrow(COL_SENDER_TYPE)
+            val timestampIndex = cursor.getColumnIndexOrThrow(COL_TIMESTAMP_MILLIS)
+
+            while (cursor.moveToNext()) {
+                messages.add(
+                    ChatMessage(
+                        id = cursor.getLong(idIndex),
+                        username = cursor.getString(usernameIndex),
+                        messageText = cursor.getString(messageIndex),
+                        senderType = SenderType.valueOf(cursor.getString(senderIndex)),
+                        timestampMillis = cursor.getLong(timestampIndex)
+                    )
+                )
+            }
+        }
+        return messages
+    }
+
+    fun clearMessagesByUsername(username: String) {
+        writableDatabase.delete(
+            TABLE_MESSAGES,
+            "$COL_USERNAME = ? OR $COL_USERNAME = ?",
+            arrayOf(username, CHAT_BOT_USERNAME)
+        )
+    }
+
     companion object {
         private const val DATABASE_NAME = "chat_storage.db"
         private const val DATABASE_VERSION = 1
@@ -89,5 +128,6 @@ class ChatStorage(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, n
         private const val COL_MESSAGE_TEXT = "message_text"
         private const val COL_SENDER_TYPE = "sender_type"
         private const val COL_TIMESTAMP_MILLIS = "timestamp_millis"
+        private const val CHAT_BOT_USERNAME = "ChatBot"
     }
 }
